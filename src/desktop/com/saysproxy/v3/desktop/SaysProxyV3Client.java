@@ -6,6 +6,7 @@ import com.saysproxy.v3.common.TunnelClient;
 import com.saysproxy.v3.common.TunnelListener;
 
 import javax.swing.BorderFactory;
+import javax.swing.Icon;
 import javax.swing.JButton;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
@@ -19,18 +20,30 @@ import javax.swing.JTextField;
 import javax.swing.SwingUtilities;
 import javax.swing.UIManager;
 import javax.swing.border.EmptyBorder;
+import javax.swing.filechooser.FileSystemView;
+import java.awt.AWTException;
 import java.awt.BorderLayout;
 import java.awt.Dimension;
 import java.awt.Font;
+import java.awt.Graphics2D;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
+import java.awt.Image;
 import java.awt.Insets;
+import java.awt.MenuItem;
+import java.awt.PopupMenu;
+import java.awt.RenderingHints;
+import java.awt.SystemTray;
 import java.awt.Toolkit;
+import java.awt.TrayIcon;
 import java.awt.datatransfer.StringSelection;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
+import java.awt.image.BufferedImage;
+import java.io.File;
+import java.io.IOException;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 
@@ -56,30 +69,193 @@ public final class SaysProxyV3Client extends JFrame {
     private final JButton copyButton = new JButton("复制代理地址");
     private final JTextArea logArea = new JTextArea(12, 70);
     private final JTextArea instructions = new JTextArea();
+    private final ClientSettings clientSettings = ClientSettings.forCurrentUser();
 
     private volatile TunnelClient tunnel;
     private volatile LocalProxyServer proxyServer;
     private volatile boolean connecting;
     private volatile boolean manualDisconnect;
     private volatile boolean closing;
+    private volatile TrayIcon trayIcon;
+    private volatile boolean trayHintShown;
 
     public SaysProxyV3Client() {
         super("SaysProxyV3 客户端");
         setDefaultCloseOperation(DO_NOTHING_ON_CLOSE);
         buildUi();
         bindActions();
+        loadSettingsSafely();
         resetToDisconnected();
         addWindowListener(new WindowAdapter() {
             @Override
             public void windowClosing(WindowEvent event) {
-                closing = true;
-                disconnect();
-                dispose();
+                if (trayIcon != null) {
+                    hideToTray();
+                } else {
+                    exitApplication();
+                }
             }
         });
+        setupTray();
         setMinimumSize(new Dimension(720, 620));
         pack();
         setLocationRelativeTo(null);
+    }
+
+    private void setupTray() {
+        Image trayImage = loadJavaDefaultIcon();
+        if (!SystemTray.isSupported()) {
+            log("当前系统不支持系统托盘，关闭窗口将退出程序");
+            return;
+        }
+        try {
+            PopupMenu menu = new PopupMenu();
+            MenuItem showItem = new MenuItem("显示主界面");
+            showItem.addActionListener(new ActionListener() {
+                @Override
+                public void actionPerformed(ActionEvent e) {
+                    showWindow();
+                }
+            });
+            MenuItem exitItem = new MenuItem("退出 SaysProxyV3");
+            exitItem.addActionListener(new ActionListener() {
+                @Override
+                public void actionPerformed(ActionEvent e) {
+                    exitApplication();
+                }
+            });
+            menu.add(showItem);
+            menu.addSeparator();
+            menu.add(exitItem);
+
+            TrayIcon icon = new TrayIcon(trayImage, "SaysProxyV3 - 未连接", menu);
+            icon.setImageAutoSize(true);
+            icon.addActionListener(new ActionListener() {
+                @Override
+                public void actionPerformed(ActionEvent e) {
+                    showWindow();
+                }
+            });
+            SystemTray.getSystemTray().add(icon);
+            trayIcon = icon;
+            log("系统托盘已启用：关闭窗口后程序继续在后台运行，右键托盘图标可退出");
+        } catch (AWTException e) {
+            trayIcon = null;
+            log("创建系统托盘图标失败，关闭窗口将退出程序: " + e.getMessage());
+        } catch (RuntimeException e) {
+            trayIcon = null;
+            log("创建系统托盘图标失败，关闭窗口将退出程序: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Uses the operating system's icon for this Java archive. On Windows this
+     * is the standard Java application icon. No custom icon asset is bundled;
+     * the main window keeps the platform/AWT default icon.
+     */
+    private static Image loadJavaDefaultIcon() {
+        try {
+            File location = new File(SaysProxyV3Client.class.getProtectionDomain()
+                    .getCodeSource().getLocation().toURI());
+            if (location.isFile()) {
+                Icon icon = FileSystemView.getFileSystemView().getSystemIcon(location);
+                if (icon != null) {
+                    return scaleIcon(icon, 32);
+                }
+            }
+        } catch (Exception ignored) {
+        }
+        try {
+            Icon fallback = UIManager.getIcon("OptionPane.informationIcon");
+            if (fallback != null) {
+                return scaleIcon(fallback, 32);
+            }
+        } catch (RuntimeException ignored) {
+        }
+        return new BufferedImage(16, 16, BufferedImage.TYPE_INT_ARGB);
+    }
+
+    private static Image scaleIcon(Icon icon, int size) {
+        int width = Math.max(1, icon.getIconWidth());
+        int height = Math.max(1, icon.getIconHeight());
+        BufferedImage source = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D sourceGraphics = source.createGraphics();
+        try {
+            icon.paintIcon(new JLabel(), sourceGraphics, 0, 0);
+        } finally {
+            sourceGraphics.dispose();
+        }
+        BufferedImage scaled = new BufferedImage(size, size, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D graphics = scaled.createGraphics();
+        try {
+            graphics.setRenderingHint(RenderingHints.KEY_INTERPOLATION,
+                    RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+            graphics.drawImage(source, 0, 0, size, size, null);
+        } finally {
+            graphics.dispose();
+        }
+        return scaled;
+    }
+
+    private void hideToTray() {
+        setVisible(false);
+        TrayIcon icon = trayIcon;
+        if (icon != null && !trayHintShown) {
+            trayHintShown = true;
+            icon.displayMessage("SaysProxyV3",
+                    "程序已最小化到系统托盘，代理继续运行。右键托盘图标可退出。",
+                    TrayIcon.MessageType.INFO);
+        }
+    }
+
+    private void showWindow() {
+        SwingUtilities.invokeLater(new Runnable() {
+            @Override
+            public void run() {
+                if (closing) {
+                    return;
+                }
+                setVisible(true);
+                setExtendedState(getExtendedState() & ~JFrame.ICONIFIED);
+                toFront();
+                requestFocus();
+            }
+        });
+    }
+
+    private void exitApplication() {
+        if (closing) {
+            return;
+        }
+        closing = true;
+        disconnect();
+        TrayIcon icon = trayIcon;
+        trayIcon = null;
+        if (icon != null) {
+            try {
+                SystemTray.getSystemTray().remove(icon);
+            } catch (RuntimeException ignored) {
+            }
+        }
+        dispose();
+        System.exit(0);
+    }
+
+    private void updateTrayTooltip(String state) {
+        if (!SwingUtilities.isEventDispatchThread()) {
+            final String text = state;
+            SwingUtilities.invokeLater(new Runnable() {
+                @Override
+                public void run() {
+                    updateTrayTooltip(text);
+                }
+            });
+            return;
+        }
+        TrayIcon icon = trayIcon;
+        if (icon != null) {
+            icon.setToolTip("SaysProxyV3 - " + (state == null ? "未连接" : state));
+        }
     }
 
     private void buildUi() {
@@ -112,7 +288,7 @@ public final class SaysProxyV3Client extends JFrame {
         gbc.gridx = 0;
         gbc.gridy = 6;
         gbc.gridwidth = 2;
-        JLabel hint = new JLabel("服务器连接密码由服务器首次启动时生成，见 config/connection-password.txt。");
+        JLabel hint = new JLabel("连接信息自动保存在本机（服务器地址、连接密码、账户名）；账户密码不保存。");
         hint.setFont(hint.getFont().deriveFont(Font.PLAIN, 11f));
         form.add(hint, gbc);
 
@@ -224,12 +400,14 @@ public final class SaysProxyV3Client extends JFrame {
             return;
         }
 
+        saveSettingsSafely(serverHost, serverPort, connectionPassword, username, localPort);
         connecting = true;
         manualDisconnect = false;
         setInputsEnabled(false);
         connectButton.setEnabled(false);
         disconnectButton.setEnabled(false);
         statusLabel.setText("正在连接…");
+        updateTrayTooltip("正在连接");
         proxyAddressField.setText("");
         log("正在连接 " + serverHost + ":" + serverPort + " …");
 
@@ -280,6 +458,7 @@ public final class SaysProxyV3Client extends JFrame {
                         public void run() {
                             connecting = false;
                             statusLabel.setText("已连接");
+                            updateTrayTooltip("已连接 127.0.0.1:" + actualLocalPort);
                             proxyAddressField.setText("SOCKS5 / HTTP  127.0.0.1:" + actualLocalPort);
                             proxyAddressField.setEnabled(true);
                             disconnectButton.setEnabled(true);
@@ -310,10 +489,16 @@ public final class SaysProxyV3Client extends JFrame {
                             proxyServer = null;
                             resetToDisconnected();
                             statusLabel.setText("连接失败");
+                            updateTrayTooltip("连接失败");
                             log("连接失败: " + e.getMessage());
                             if (!closing) {
-                                JOptionPane.showMessageDialog(SaysProxyV3Client.this,
-                                        e.getMessage(), "连接失败", JOptionPane.ERROR_MESSAGE);
+                                if (!isVisible() && trayIcon != null) {
+                                    trayIcon.displayMessage("连接失败", e.getMessage(),
+                                            TrayIcon.MessageType.ERROR);
+                                } else {
+                                    JOptionPane.showMessageDialog(SaysProxyV3Client.this,
+                                            e.getMessage(), "连接失败", JOptionPane.ERROR_MESSAGE);
+                                }
                             }
                         }
                     });
@@ -363,14 +548,20 @@ public final class SaysProxyV3Client extends JFrame {
         connecting = false;
         resetToDisconnected();
         statusLabel.setText("连接已断开");
+        updateTrayTooltip("连接已断开");
         log("服务器连接已断开: " + reason);
-        JOptionPane.showMessageDialog(this, "与服务器的连接已断开：\n" + reason,
-                "连接断开", JOptionPane.WARNING_MESSAGE);
+        if (!isVisible() && trayIcon != null) {
+            trayIcon.displayMessage("连接已断开", reason, TrayIcon.MessageType.WARNING);
+        } else {
+            JOptionPane.showMessageDialog(this, "与服务器的连接已断开：\n" + reason,
+                    "连接断开", JOptionPane.WARNING_MESSAGE);
+        }
     }
 
     private void resetToDisconnected() {
         if (connecting) {
             statusLabel.setText("正在连接…");
+            updateTrayTooltip("正在连接");
             setInputsEnabled(false);
             connectButton.setEnabled(false);
             disconnectButton.setEnabled(false);
@@ -380,6 +571,7 @@ public final class SaysProxyV3Client extends JFrame {
             return;
         }
         statusLabel.setText("未连接");
+        updateTrayTooltip("未连接");
         setInputsEnabled(tunnel == null);
         connectButton.setEnabled(tunnel == null);
         disconnectButton.setEnabled(tunnel != null);
@@ -397,6 +589,44 @@ public final class SaysProxyV3Client extends JFrame {
         usernameField.setEnabled(enabled);
         accountPasswordField.setEnabled(enabled);
         localPortField.setEnabled(enabled);
+    }
+
+    private void loadSettingsSafely() {
+        try {
+            ClientSettings.Data data = clientSettings.load();
+            if (data.serverHost.isEmpty() && data.connectionPassword.isEmpty()
+                    && data.username.isEmpty()) {
+                return;
+            }
+            if (!data.serverHost.isEmpty()) {
+                serverField.setText(data.serverHost);
+            }
+            portField.setText(Integer.toString(data.serverPort));
+            connectionPasswordField.setText(data.connectionPassword);
+            if (!data.username.isEmpty()) {
+                usernameField.setText(data.username);
+            }
+            localPortField.setText(Integer.toString(data.localPort));
+            log("已载入上次连接信息（账户密码需重新输入）");
+        } catch (IOException e) {
+            log("读取本机连接配置失败: " + e.getMessage());
+        }
+    }
+
+    private void saveSettingsSafely(String serverHost, int serverPort, String connectionPassword,
+                                    String username, int localPort) {
+        ClientSettings.Data data = new ClientSettings.Data();
+        data.serverHost = serverHost;
+        data.serverPort = serverPort;
+        data.connectionPassword = connectionPassword;
+        data.username = username;
+        data.localPort = localPort;
+        try {
+            clientSettings.save(data);
+            log("已保存连接信息（不含账户密码）");
+        } catch (IOException e) {
+            log("保存连接信息失败: " + e.getMessage());
+        }
     }
 
     private void log(final String message) {

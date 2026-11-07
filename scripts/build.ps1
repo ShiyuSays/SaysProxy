@@ -43,13 +43,13 @@ Set-Content -Path $serverManifest -Encoding ASCII -Value @(
     'Manifest-Version: 1.0',
     'Main-Class: com.saysproxy.v3.server.Main',
     'Implementation-Title: SaysProxyV3 Server',
-    'Implementation-Version: 3.0'
+    'Implementation-Version: 3.1'
 )
 Set-Content -Path $clientManifest -Encoding ASCII -Value @(
     'Manifest-Version: 1.0',
     'Main-Class: com.saysproxy.v3.desktop.SaysProxyV3Client',
     'Implementation-Title: SaysProxyV3 Desktop Client',
-    'Implementation-Version: 3.0'
+    'Implementation-Version: 3.1'
 )
 
 $serverJar = Join-Path $serverDist 'SaysProxyV3-Server.jar'
