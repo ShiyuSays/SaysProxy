@@ -93,6 +93,8 @@ public final class ProxyServer {
         running = true;
         logs.audit("SERVER_START", "system", null,
                 "bind=" + config.bindAddress + ":" + config.port + " users=" + users.size());
+        ConsoleEvents.print("服务器已启动  监听=" + config.bindAddress + ":" + getPort()
+                + "  用户数=" + users.size());
         Thread acceptThread = new Thread(new Runnable() {
             @Override
             public void run() {
@@ -167,6 +169,7 @@ public final class ProxyServer {
         workers.shutdownNow();
         streamConnectors.shutdownNow();
         logs.audit("SERVER_STOP", "system", null, "activeSessions=" + registry.getTotal());
+        ConsoleEvents.print("服务器已停止  活动会话=" + registry.getTotal());
         stopped.countDown();
     }
 
@@ -286,6 +289,9 @@ public final class ProxyServer {
                     sendAuthFailure(nowBanned ? "登录失败次数过多，请稍后再试" : "账户名或密码错误");
                     logs.audit("AUTH_FAIL", IoUtil.logSafe(attemptedUsername), remoteIp,
                             "session=" + sessionId + " banned=" + nowBanned);
+                    ConsoleEvents.print("登录失败  用户=" + IoUtil.logSafe(attemptedUsername)
+                            + "  IP=" + remoteIp + "  会话=" + sessionId
+                            + (nowBanned ? "  已临时封禁" : ""));
                     reason = "认证失败";
                     return;
                 }
@@ -295,6 +301,8 @@ public final class ProxyServer {
                     sendAuthFailure(rejection);
                     logs.audit("AUTH_REJECTED", IoUtil.logSafe(attemptedUsername), remoteIp,
                             "session=" + sessionId + " reason=" + IoUtil.logSafe(rejection));
+                    ConsoleEvents.print("登录被拒绝  用户=" + IoUtil.logSafe(attemptedUsername)
+                            + "  IP=" + remoteIp + "  原因=" + IoUtil.logSafe(rejection));
                     reason = rejection;
                     return;
                 }
@@ -305,6 +313,9 @@ public final class ProxyServer {
                 sendAuthSuccess("登录成功");
                 logs.access("LOGIN", username, remoteIp, null, "session=" + sessionId);
                 logs.audit("LOGIN", username, remoteIp, "session=" + sessionId);
+                ConsoleEvents.print("登录成功  用户=" + IoUtil.logSafe(username)
+                        + "  IP=" + remoteIp + "  会话=" + sessionId
+                        + "  在线=" + registry.getTotal());
                 socket.setSoTimeout(config.idleTimeoutSeconds * 1000);
 
                 while (running && !finished.get()) {
@@ -453,6 +464,9 @@ public final class ProxyServer {
         void openConnected(ServerStream stream) {
             logs.access("CONNECT", username, remoteIp, stream.targetText(),
                     "session=" + sessionId + " stream=" + stream.id + " result=OK");
+            ConsoleEvents.print("打开连接  用户=" + IoUtil.logSafe(username)
+                    + "  目标=" + IoUtil.logSafe(stream.targetText())
+                    + "  会话=" + sessionId + "  流=" + stream.id);
         }
 
         void openFailed(ServerStream stream, String message) {
@@ -465,6 +479,9 @@ public final class ProxyServer {
                 logs.access("CONNECT", username, remoteIp, stream.targetText(),
                         "session=" + sessionId + " stream=" + stream.id
                                 + " result=FAIL reason=" + IoUtil.logSafe(message));
+                ConsoleEvents.print("连接失败  用户=" + IoUtil.logSafe(username)
+                        + "  目标=" + IoUtil.logSafe(stream.targetText())
+                        + "  原因=" + IoUtil.logSafe(message));
             }
         }
 
@@ -495,6 +512,12 @@ public final class ProxyServer {
                             + " downBytes=" + stream.downBytes.get()
                             + " durationMs=" + duration
                             + " reason=" + IoUtil.logSafe(reason));
+            ConsoleEvents.print("关闭连接  用户=" + IoUtil.logSafe(username)
+                    + "  目标=" + IoUtil.logSafe(stream.targetText())
+                    + "  上行=" + stream.upBytes.get() + "B"
+                    + "  下行=" + stream.downBytes.get() + "B"
+                    + "  时长=" + duration + "ms"
+                    + "  原因=" + IoUtil.logSafe(reason));
         }
 
         boolean sendFrame(byte type, int streamId, byte[] payload) {
@@ -559,6 +582,10 @@ public final class ProxyServer {
                 logs.access("LOGOUT", username, remoteIp, null,
                         "session=" + sessionId + " reason=" + IoUtil.logSafe(finishReason)
                                 + " durationMs=" + (System.currentTimeMillis() - startedAt));
+                ConsoleEvents.print("下线  用户=" + IoUtil.logSafe(username)
+                        + "  IP=" + remoteIp
+                        + "  原因=" + IoUtil.logSafe(finishReason)
+                        + "  在线=" + registry.getTotal());
             }
             sessions.remove(this);
             connectionSlots.release();

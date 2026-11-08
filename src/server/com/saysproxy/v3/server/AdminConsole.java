@@ -71,6 +71,8 @@ public final class AdminConsole {
                     }
                     users.add(parts[1], parts[2].toCharArray());
                     logs.audit("ADMIN_ADD_USER", "console", null, "user=" + com.saysproxy.v3.common.IoUtil.logSafe(parts[1]));
+                    ConsoleEvents.print("管理员操作  /add  用户="
+                            + com.saysproxy.v3.common.IoUtil.logSafe(parts[1]));
                     System.out.println("已添加用户: " + parts[1]);
                 } else if ("/del".equals(command)) {
                     if (parts.length != 2) {
@@ -81,6 +83,8 @@ public final class AdminConsole {
                     if (removed) {
                         server.kickUser(parts[1]);
                         logs.audit("ADMIN_DEL_USER", "console", null, "user=" + com.saysproxy.v3.common.IoUtil.logSafe(parts[1]));
+                        ConsoleEvents.print("管理员操作  /del  用户="
+                                + com.saysproxy.v3.common.IoUtil.logSafe(parts[1]));
                         System.out.println("已删除用户: " + parts[1]);
                     } else {
                         System.out.println("用户不存在: " + parts[1]);
@@ -94,6 +98,8 @@ public final class AdminConsole {
                     server.kickUser(parts[1]);
                     logs.audit("ADMIN_CHANGE_PASSWORD", "console", null,
                             "user=" + com.saysproxy.v3.common.IoUtil.logSafe(parts[1]));
+                    ConsoleEvents.print("管理员操作  /passwd  用户="
+                            + com.saysproxy.v3.common.IoUtil.logSafe(parts[1]));
                     System.out.println("已更新密码并强制该用户重新登录: " + parts[1]);
                 } else if ("/list".equals(command)) {
                     List<UserStore.UserInfo> list = users.list();
@@ -114,6 +120,9 @@ public final class AdminConsole {
                     boolean kicked = server.kickUser(parts[1]);
                     logs.audit("ADMIN_KICK_USER", "console", null,
                             "user=" + com.saysproxy.v3.common.IoUtil.logSafe(parts[1]) + " kicked=" + kicked);
+                    ConsoleEvents.print("管理员操作  /kick  用户="
+                            + com.saysproxy.v3.common.IoUtil.logSafe(parts[1])
+                            + "  结果=" + (kicked ? "已下线" : "无在线会话"));
                     System.out.println(kicked ? "已强制下线: " + parts[1] : "该用户当前没有在线会话");
                 } else if ("/status".equals(command)) {
                     System.out.println("监听端口: " + server.getPort());
@@ -121,6 +130,7 @@ public final class AdminConsole {
                     System.out.println("用户数: " + users.size());
                 } else if ("/stop".equals(command)) {
                     logs.audit("ADMIN_STOP", "console", null, null);
+                    ConsoleEvents.print("管理员操作  /stop");
                     System.out.println("正在关闭服务器…");
                     server.stop();
                     shutdown.countDown();
