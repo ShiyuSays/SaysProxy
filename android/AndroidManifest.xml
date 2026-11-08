@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.saysproxy.v3.android"
-    android:versionCode="4"
+    android:versionCode="5"
     android:versionName="3.1">
 
     <uses-sdk android:minSdkVersion="26" android:targetSdkVersion="33" />
@@ -10,6 +10,7 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
 
     <application
         android:allowBackup="false"
@@ -31,6 +32,7 @@
 
         <service
             android:name=".ProxyService"
-            android:exported="false" />
+            android:exported="false"
+            android:stopWithTask="false" />
     </application>
 </manifest>

@@ -10,8 +10,10 @@ import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.graphics.Typeface;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.provider.Settings;
 import android.text.InputType;
 import android.view.Gravity;
 import android.view.View;
@@ -22,6 +24,7 @@ import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import java.util.List;
 
@@ -142,13 +145,25 @@ public final class MainActivity extends Activity implements ProxyBus.Listener {
         root.addView(copyButton, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
+        Button keepAliveButton = new Button(this);
+        keepAliveButton.setText("后台保活设置");
+        keepAliveButton.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                openBatteryOptimizationSettings();
+            }
+        });
+        root.addView(keepAliveButton, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
         TextView usage = new TextView(this);
         usage.setText("使用方法\n"
                 + "1. 连接成功后，本机 127.0.0.1:" + LOCAL_PORT + " 提供 SOCKS5 与 HTTP 代理。\n"
                 + "2. 支持代理设置的 App 可直接填 127.0.0.1:" + LOCAL_PORT + "。\n"
                 + "3. Android 系统可在 Wi-Fi 的高级设置里填写 HTTP 代理；不同厂商系统可能限制回环地址。\n"
                 + "4. 本版本是本地代理模式，不接管全部 App 流量；未设置代理的 App 不会经过服务器。\n"
-                + "5. 服务器地址、连接密码和账户名会自动保存在本机；账户密码不保存。");
+                + "5. 服务器地址、连接密码和账户名会自动保存在本机；账户密码不保存。\n"
+                + "6. 后台挂机：应用使用前台服务和唤醒锁；建议点“后台保活设置”关闭电池优化，并在厂商设置中允许自启动。");
         usage.setTextSize(12);
         usage.setTextColor(Color.rgb(70, 70, 70));
         usage.setPadding(0, dp(14), 0, dp(10));
@@ -299,6 +314,25 @@ public final class MainActivity extends Activity implements ProxyBus.Listener {
                 .putString(PREF_CONNECTION_PASSWORD, connectionPassword)
                 .putString(PREF_USERNAME, username)
                 .apply();
+    }
+
+    private void openBatteryOptimizationSettings() {
+        try {
+            startActivity(new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS));
+            Toast.makeText(this, "找到 SaysProxyV3，选择“不优化”或允许后台活动",
+                    Toast.LENGTH_LONG).show();
+        } catch (RuntimeException e) {
+            try {
+                Intent details = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                        Uri.parse("package:" + getPackageName()));
+                startActivity(details);
+                Toast.makeText(this, "请在电池/后台设置中允许 SaysProxyV3 后台运行",
+                        Toast.LENGTH_LONG).show();
+            } catch (RuntimeException ignored) {
+                Toast.makeText(this, "无法打开电池优化设置，请手动在系统设置中关闭省电限制",
+                        Toast.LENGTH_LONG).show();
+            }
+        }
     }
 
     private void requestNotificationPermissionIfNeeded() {

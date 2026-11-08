@@ -8,6 +8,7 @@ import android.app.Service;
 import android.content.Intent;
 import android.os.Build;
 import android.os.IBinder;
+import android.os.PowerManager;
 
 import com.saysproxy.v3.common.LocalProxyServer;
 import com.saysproxy.v3.common.LogSink;
@@ -43,6 +44,7 @@ public final class ProxyService extends Service {
     private volatile LocalProxyServer proxyServer;
     private volatile Thread connectThread;
     private volatile boolean remoteLost;
+    private PowerManager.WakeLock wakeLock;
 
     @Override
     public void onCreate() {
@@ -88,9 +90,10 @@ public final class ProxyService extends Service {
         }
         if (connectThread != null && connectThread.isAlive()) {
             ProxyBus.log("已有连接正在建立，请稍候");
-            return START_NOT_STICKY;
+            return START_REDELIVER_INTENT;
         }
 
+        acquireWakeLock();
         connectThread = new Thread(new Runnable() {
             @Override
             public void run() {
@@ -99,7 +102,7 @@ public final class ProxyService extends Service {
         }, "spv3-android-connect");
         connectThread.setDaemon(true);
         connectThread.start();
-        return START_NOT_STICKY;
+        return START_REDELIVER_INTENT;
     }
 
     private void connect(String server, int port, String connectionPassword, String username,
@@ -185,6 +188,39 @@ public final class ProxyService extends Service {
         }
     }
 
+    private synchronized void acquireWakeLock() {
+        if (wakeLock != null && wakeLock.isHeld()) {
+            return;
+        }
+        PowerManager powerManager = (PowerManager) getSystemService(POWER_SERVICE);
+        if (powerManager == null) {
+            return;
+        }
+        try {
+            wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK,
+                    "SaysProxyV3:proxy");
+            wakeLock.setReferenceCounted(false);
+            wakeLock.acquire();
+            ProxyBus.log("已启用后台保活唤醒锁，屏幕关闭时继续运行（会增加耗电）");
+        } catch (RuntimeException e) {
+            wakeLock = null;
+            ProxyBus.log("启用后台保活失败: " + e.getMessage());
+        }
+    }
+
+    private synchronized void releaseWakeLock() {
+        PowerManager.WakeLock lock = wakeLock;
+        wakeLock = null;
+        if (lock != null) {
+            try {
+                if (lock.isHeld()) {
+                    lock.release();
+                }
+            } catch (RuntimeException ignored) {
+            }
+        }
+    }
+
     private Notification buildNotification(String text) {
         Intent intent = new Intent(this, MainActivity.class);
         intent.setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_NEW_TASK);
@@ -224,6 +260,7 @@ public final class ProxyService extends Service {
     public void onDestroy() {
         destroyed.set(true);
         closeResources();
+        releaseWakeLock();
         stopForeground(STOP_FOREGROUND_REMOVE);
         if (ProxyBus.getState() != ProxyBus.State.ERROR) {
             ProxyBus.setState(ProxyBus.State.DISCONNECTED, "未连接", -1);
