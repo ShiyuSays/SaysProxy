@@ -14,6 +14,8 @@ import android.net.Uri;
 import android.net.VpnService;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.provider.Settings;
 import android.text.InputType;
 import android.view.Gravity;
@@ -53,6 +55,22 @@ public final class MainActivity extends Activity implements ProxyBus.Listener {
     private TextView statusView;
     private TextView proxyView;
     private TextView logView;
+    private final Handler uiHandler = new Handler(Looper.getMainLooper());
+    private final Runnable disconnectWatchdog = new Runnable() {
+        @Override
+        public void run() {
+            if (ProxyBus.getState() != ProxyBus.State.DISCONNECTED) {
+                try {
+                    stopService(new Intent(MainActivity.this, ProxyService.class));
+                } catch (RuntimeException ignored) {
+                }
+                applyState(ProxyBus.State.DISCONNECTED, "未连接", -1);
+                Toast.makeText(MainActivity.this,
+                        "断开超时，已强制关闭界面；如果 VPN 图标仍在，请重新打开应用或重启手机",
+                        Toast.LENGTH_LONG).show();
+            }
+        }
+    };
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -322,12 +340,25 @@ public final class MainActivity extends Activity implements ProxyBus.Listener {
     }
 
     private void disconnect() {
-        stopService(new Intent(this, ProxyService.class));
+        uiHandler.removeCallbacks(disconnectWatchdog);
         statusView.setText("正在断开…");
         statusView.setTextColor(Color.rgb(230, 126, 0));
         connectButton.setEnabled(false);
         disconnectButton.setEnabled(false);
         setInputsEnabled(false);
+        Intent intent = new Intent(this, ProxyService.class);
+        intent.setAction(ProxyService.ACTION_DISCONNECT);
+        try {
+            startService(intent);
+            uiHandler.postDelayed(disconnectWatchdog, 5000);
+        } catch (RuntimeException e) {
+            try {
+                stopService(new Intent(this, ProxyService.class));
+            } catch (RuntimeException ignored) {
+            }
+            applyState(ProxyBus.State.DISCONNECTED, "未连接", -1);
+            showError("断开失败: " + e.getMessage());
+        }
     }
 
     private void showError(String message) {
@@ -468,6 +499,9 @@ public final class MainActivity extends Activity implements ProxyBus.Listener {
         runOnUiThread(new Runnable() {
             @Override
             public void run() {
+                if (state == ProxyBus.State.DISCONNECTED) {
+                    uiHandler.removeCallbacks(disconnectWatchdog);
+                }
                 applyState(state, detail, localPort);
             }
         });
@@ -500,6 +534,12 @@ public final class MainActivity extends Activity implements ProxyBus.Listener {
     protected void onStop() {
         ProxyBus.unregister(this);
         super.onStop();
+    }
+
+    @Override
+    protected void onDestroy() {
+        uiHandler.removeCallbacks(disconnectWatchdog);
+        super.onDestroy();
     }
 
     private int dp(int value) {

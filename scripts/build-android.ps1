@@ -57,7 +57,7 @@ if ($LASTEXITCODE -ne 0) { throw 'aapt2 compile failed' }
 & (Join-Path $bt 'aapt2.exe') link -o $appUnsigned -I $androidJar `
     --manifest (Join-Path $root 'android\AndroidManifest.xml') $resZip `
     --java $gen --min-sdk-version 26 --target-sdk-version 33 `
-    --version-code 6 --version-name 3.2
+    --version-code 7 --version-name 3.2.1
 if ($LASTEXITCODE -ne 0) { throw 'aapt2 link failed' }
 
 Write-Host 'Compiling Java...'

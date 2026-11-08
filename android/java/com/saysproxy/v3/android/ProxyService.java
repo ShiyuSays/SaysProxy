@@ -65,6 +65,12 @@ public final class ProxyService extends VpnService {
         }
         String action = intent.getAction();
         if (ACTION_DISCONNECT.equals(action)) {
+            ProxyBus.log("正在断开代理…");
+            destroyed.set(true);
+            closeResources();
+            releaseWakeLock();
+            stopForeground(STOP_FOREGROUND_REMOVE);
+            ProxyBus.setState(ProxyBus.State.DISCONNECTED, "未连接", -1);
             stopSelf();
             return START_NOT_STICKY;
         }
@@ -72,6 +78,8 @@ public final class ProxyService extends VpnService {
             stopSelf();
             return START_NOT_STICKY;
         }
+        destroyed.set(false);
+        remoteLost = false;
 
         final String server = trim(intent.getStringExtra(EXTRA_SERVER));
         final int port = intent.getIntExtra(EXTRA_PORT, 0);
@@ -200,6 +208,7 @@ public final class ProxyService extends VpnService {
     }
 
     private synchronized void closeResources() {
+        closeVpn();
         LocalProxyServer proxy = proxyServer;
         proxyServer = null;
         if (proxy != null) {
@@ -210,7 +219,6 @@ public final class ProxyService extends VpnService {
         if (client != null) {
             client.disconnect();
         }
-        closeVpn();
     }
 
     private synchronized void establishVpn(int localPort) throws Exception {
@@ -321,7 +329,11 @@ public final class ProxyService extends VpnService {
     @Override
     public void onRevoke() {
         ProxyBus.log("系统已撤销 VPN 授权，代理服务停止");
-        closeVpn();
+        destroyed.set(true);
+        closeResources();
+        releaseWakeLock();
+        stopForeground(STOP_FOREGROUND_REMOVE);
+        ProxyBus.setState(ProxyBus.State.DISCONNECTED, "未连接", -1);
         stopSelf();
     }
 
