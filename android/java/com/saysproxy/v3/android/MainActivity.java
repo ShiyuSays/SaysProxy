@@ -11,6 +11,7 @@ import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.net.Uri;
+import android.net.VpnService;
 import android.os.Build;
 import android.os.Bundle;
 import android.provider.Settings;
@@ -20,6 +21,7 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.Button;
+import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
@@ -32,11 +34,13 @@ import java.util.List;
 public final class MainActivity extends Activity implements ProxyBus.Listener {
     private static final int LOCAL_PORT = 1080;
     private static final int REQUEST_NOTIFICATIONS = 41;
+    private static final int REQUEST_VPN = 42;
     private static final String PREFS_NAME = "saysproxy_client";
     private static final String PREF_SERVER = "server";
     private static final String PREF_PORT = "port";
     private static final String PREF_CONNECTION_PASSWORD = "connection_password";
     private static final String PREF_USERNAME = "username";
+    private static final String PREF_VPN_MODE = "vpn_mode";
 
     private EditText serverField;
     private EditText portField;
@@ -45,6 +49,7 @@ public final class MainActivity extends Activity implements ProxyBus.Listener {
     private EditText passwordField;
     private Button connectButton;
     private Button disconnectButton;
+    private CheckBox vpnModeBox;
     private TextView statusView;
     private TextView proxyView;
     private TextView logView;
@@ -99,6 +104,20 @@ public final class MainActivity extends Activity implements ProxyBus.Listener {
         localInfo.setTextColor(Color.rgb(40, 80, 140));
         localInfo.setPadding(0, dp(2), 0, dp(10));
         root.addView(localInfo);
+
+        vpnModeBox = new CheckBox(this);
+        vpnModeBox.setText("VPN 模式（系统识别为 VPN）");
+        vpnModeBox.setChecked(true);
+        root.addView(vpnModeBox);
+
+        TextView vpnHint = new TextView(this);
+        vpnHint.setText("VPN 模式会建立系统 VPN 并设置 HTTP 代理：浏览器等遵循系统代理的 App 可用；"
+                + "不遵循代理的 App 可能无法联网。使用 VPN 模式时请把 Wi-Fi 代理关掉。"
+                + "关闭此选项则使用本地代理模式。");
+        vpnHint.setTextSize(11);
+        vpnHint.setTextColor(Color.rgb(120, 80, 20));
+        vpnHint.setPadding(0, 0, 0, dp(8));
+        root.addView(vpnHint);
 
         LinearLayout buttonRow = new LinearLayout(this);
         buttonRow.setOrientation(LinearLayout.HORIZONTAL);
@@ -160,8 +179,8 @@ public final class MainActivity extends Activity implements ProxyBus.Listener {
         usage.setText("使用方法\n"
                 + "1. 连接成功后，本机 127.0.0.1:" + LOCAL_PORT + " 提供 SOCKS5 与 HTTP 代理。\n"
                 + "2. 支持代理设置的 App 可直接填 127.0.0.1:" + LOCAL_PORT + "。\n"
-                + "3. Android 系统可在 Wi-Fi 的高级设置里填写 HTTP 代理；不同厂商系统可能限制回环地址。\n"
-                + "4. 本版本是本地代理模式，不接管全部 App 流量；未设置代理的 App 不会经过服务器。\n"
+                + "3. VPN 模式会建立系统 VPN 并自动设置 HTTP 代理；不是全流量 TUN，不遵循系统代理的 App 可能无法联网。\n"
+                + "4. 使用 VPN 模式时请关闭 Wi-Fi 代理；关闭 VPN 模式则可用 Wi-Fi 代理填写 127.0.0.1:" + LOCAL_PORT + "。\n"
                 + "5. 服务器地址、连接密码和账户名会自动保存在本机；账户密码不保存。\n"
                 + "6. 后台挂机：应用使用前台服务和唤醒锁；建议点“后台保活设置”关闭电池优化，并在厂商设置中允许自启动。");
         usage.setTextSize(12);
@@ -252,7 +271,23 @@ public final class MainActivity extends Activity implements ProxyBus.Listener {
             showError("请输入账户密码");
             return;
         }
-        saveSettings(server, port, connectionPassword, username);
+        boolean useVpn = vpnModeBox.isChecked();
+        if (useVpn && Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            showError("VPN 模式需要 Android 10 及以上；请关闭 VPN 模式后重试");
+            return;
+        }
+        saveSettings(server, port, connectionPassword, username, useVpn);
+        if (useVpn) {
+            Intent prepare = VpnService.prepare(this);
+            if (prepare != null) {
+                try {
+                    startActivityForResult(prepare, REQUEST_VPN);
+                } catch (RuntimeException e) {
+                    showError("无法请求 VPN 权限: " + e.getMessage());
+                }
+                return;
+            }
+        }
         hideKeyboard();
         requestNotificationPermissionIfNeeded();
         Intent intent = new Intent(this, ProxyService.class);
@@ -263,13 +298,27 @@ public final class MainActivity extends Activity implements ProxyBus.Listener {
         intent.putExtra(ProxyService.EXTRA_USERNAME, username);
         intent.putExtra(ProxyService.EXTRA_PASSWORD, password);
         intent.putExtra(ProxyService.EXTRA_LOCAL_PORT, LOCAL_PORT);
+        intent.putExtra(ProxyService.EXTRA_VPN_MODE, useVpn);
         try {
             startForegroundService(intent);
         } catch (RuntimeException e) {
             applyState(ProxyBus.State.ERROR, "无法启动代理服务: " + e.getMessage(), -1);
             return;
         }
-        applyState(ProxyBus.State.CONNECTING, "正在连接 " + server + ":" + port, -1);
+        applyState(ProxyBus.State.CONNECTING,
+                useVpn ? "正在连接并准备 VPN…" : "正在连接 " + server + ":" + port, -1);
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == REQUEST_VPN) {
+            if (resultCode == RESULT_OK) {
+                connect();
+            } else {
+                showError("未授予 VPN 权限；可关闭 VPN 模式改用本地代理");
+            }
+        }
     }
 
     private void disconnect() {
@@ -304,15 +353,18 @@ public final class MainActivity extends Activity implements ProxyBus.Listener {
         if (username != null && !username.isEmpty()) {
             usernameField.setText(username);
         }
+        vpnModeBox.setChecked(preferences.getBoolean(PREF_VPN_MODE, true));
     }
 
-    private void saveSettings(String server, int port, String connectionPassword, String username) {
+    private void saveSettings(String server, int port, String connectionPassword, String username,
+                              boolean vpnMode) {
         SharedPreferences preferences = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
         preferences.edit()
                 .putString(PREF_SERVER, server)
                 .putInt(PREF_PORT, port)
                 .putString(PREF_CONNECTION_PASSWORD, connectionPassword)
                 .putString(PREF_USERNAME, username)
+                .putBoolean(PREF_VPN_MODE, vpnMode)
                 .apply();
     }
 
@@ -357,7 +409,7 @@ public final class MainActivity extends Activity implements ProxyBus.Listener {
     private void applyState(ProxyBus.State state, String detail, int localPort) {
         switch (state) {
             case CONNECTED:
-                statusView.setText("已连接");
+                statusView.setText(detail == null || detail.isEmpty() ? "已连接" : detail);
                 statusView.setTextColor(Color.rgb(27, 94, 32));
                 proxyView.setText("SOCKS5 / HTTP：127.0.0.1:" + localPort);
                 setInputsEnabled(false);
@@ -397,6 +449,7 @@ public final class MainActivity extends Activity implements ProxyBus.Listener {
         connectionPasswordField.setEnabled(enabled);
         usernameField.setEnabled(enabled);
         passwordField.setEnabled(enabled);
+        vpnModeBox.setEnabled(enabled);
     }
 
     private void renderLogs(List<String> logs) {

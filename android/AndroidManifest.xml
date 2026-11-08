@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.saysproxy.v3.android"
-    android:versionCode="5"
-    android:versionName="3.1">
+    android:versionCode="6"
+    android:versionName="3.2">
 
     <uses-sdk android:minSdkVersion="26" android:targetSdkVersion="33" />
 
@@ -32,7 +32,12 @@
 
         <service
             android:name=".ProxyService"
-            android:exported="false"
-            android:stopWithTask="false" />
+            android:exported="true"
+            android:permission="android.permission.BIND_VPN_SERVICE"
+            android:stopWithTask="false">
+            <intent-filter>
+                <action android:name="android.net.VpnService" />
+            </intent-filter>
+        </service>
     </application>
 </manifest>
